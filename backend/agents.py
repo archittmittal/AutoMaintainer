@@ -19,7 +19,7 @@ class AgentState(TypedDict):
 
 def run_llm(system_prompt: str, user_prompt: str):
     response = completion(
-        model="groq/llama3-70b-8192",
+        model="groq/llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
