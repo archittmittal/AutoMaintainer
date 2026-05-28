@@ -14,6 +14,7 @@ export default function Home() {
   const [pipeline, setPipeline] = useState<any[]>([]);
   const [activity, setActivity] = useState<any[]>([]);
   const [agentStatus, setAgentStatus] = useState<any>({
+    Architect: 'idle',
     Visionary: 'idle',
     Reviewer: 'idle',
     Implementer: 'idle',
@@ -102,6 +103,7 @@ export default function Home() {
           <div>
             <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4 px-2">The Crew</h2>
             <div className="space-y-1">
+              <AgentRow name="Architect" role="Principal Engineer" icon={<BrainCircuit className="w-4 h-4 text-rose-400" />} status={agentStatus.Architect} />
               <AgentRow name="Visionary" role="Brainstormer" icon={<Search className="w-4 h-4 text-emerald-400" />} status={agentStatus.Visionary} />
               <AgentRow name="Reviewer" role="Product Manager" icon={<CheckCircle className="w-4 h-4 text-amber-400" />} status={agentStatus.Reviewer} />
               <AgentRow name="Implementer" role="Developer" icon={<FileCode className="w-4 h-4 text-blue-400" />} status={agentStatus.Implementer} />
