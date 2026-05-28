@@ -127,14 +127,18 @@ async def run_agent_loop(repo_name: str, ws_manager):
     
     await ws_manager.broadcast({"agent": "System", "msg": f"Starting loop for repo: {repo_name}...", "color": "text-zinc-500"})
     
+    last_idx = 0
     # LangGraph streams node outputs
     for s in app.stream(initial_state):
-        # Find the last log message added and broadcast it
+        # Find the newly added log messages and broadcast them
         node_name = list(s.keys())[0]
         state = s[node_name]
-        if state["log_messages"]:
-            last_log = state["log_messages"][-1]
-            await ws_manager.broadcast(last_log)
-        await asyncio.sleep(1) # Add a small delay so UI looks like it's "thinking"
+        
+        new_msgs = state["log_messages"][last_idx:]
+        for msg in new_msgs:
+            await ws_manager.broadcast(msg)
+            await asyncio.sleep(0.5) # Add a small delay so UI looks like it's "thinking"
+            
+        last_idx = len(state["log_messages"])
 
     await ws_manager.broadcast({"agent": "System", "msg": "Agent loop complete.", "color": "text-zinc-500"})
