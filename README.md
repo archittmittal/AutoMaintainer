@@ -53,7 +53,6 @@ cd backend
 pip install -r requirements.txt
 fastapi dev main.py
 ```
-*The backend will run on `http://127.0.0.1:8000`.*
 
 ### 4. Run the Frontend (Next.js)
 Open a new terminal and navigate to the dashboard directory:
@@ -62,7 +61,6 @@ cd dashboard
 npm install
 npm run dev
 ```
-*The dashboard will run on `http://localhost:3000`.*
 
 ---
 
