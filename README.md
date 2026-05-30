@@ -1,3 +1,12 @@
+---
+title: AutoMaintainer
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 <div align="center">
   
 # AutoMaintainer
