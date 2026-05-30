@@ -1,6 +1,6 @@
 <div align="center">
   
-# 🚀 AutoMaintainer
+# AutoMaintainer
 **An Always-On Autonomous AI Software Engineering Team**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -16,7 +16,7 @@ Built with **LangGraph**, **FastAPI**, **Next.js**, and powered by **Llama 3 (vi
 
 ---
 
-## ✨ Features
+## Features
 - **5-Agent Hierarchy**: Tasks are distributed across specialized agents (Architect, Visionary, Reviewer, Implementer, Maintainer).
 - **Native GitHub Integration**: Agents communicate through real GitHub Issues, PR Comments, and Git Branches.
 - **Self-Correcting Iteration Loop**: If the Maintainer AI rejects a PR, the Implementer AI reads the feedback and pushes a new commit to fix the bug!
@@ -25,7 +25,7 @@ Built with **LangGraph**, **FastAPI**, **Next.js**, and powered by **Llama 3 (vi
 
 ---
 
-## 🛠️ Quick Start
+## Quick Start
 
 ### 1. Prerequisites
 - [Node.js](https://nodejs.org/en/) (v18+)
@@ -66,7 +66,7 @@ npm run dev
 
 ---
 
-## 🎮 Usage
+## Usage
 
 1. Open `http://localhost:3000` in your browser.
 2. In the sidebar under **Configuration**, click on the **Target Repository** and enter a repository you own (e.g., `your-username/your-repo`).
@@ -76,15 +76,15 @@ npm run dev
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 Curious how it works under the hood? Read our [Architecture Documentation](./ARCHITECTURE.md) to see how the 5-agent LangGraph topology operates.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 Want to add a new Agent or improve the dashboard? Check out our [Contributing Guidelines](./CONTRIBUTING.md).
 
 ---
 
-## 📜 License
+## License
 This project is licensed under the [MIT License](./LICENSE).
