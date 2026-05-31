@@ -210,13 +210,24 @@ export default function Home() {
 
         {/* Dashboard Grid or GitNexus */}
         {activeTab === 'gitnexus' ? (
-          <main className="flex-1 w-full h-full relative">
-            <iframe 
-              src="https://gitnexus.vercel.app/" 
-              className="absolute inset-0 w-full h-full border-none bg-white/5"
-              title="GitNexus Graph Explorer"
-              allow="clipboard-write; clipboard-read"
-            />
+          <main className="flex-1 p-8 flex flex-col items-center justify-center text-center">
+            <div className="max-w-md space-y-6">
+              <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_-5px_rgba(99,102,241,0.2)]">
+                <FileCode className="w-8 h-8 text-indigo-400" />
+              </div>
+              <h2 className="text-xl font-bold text-white tracking-tight">Code Graph Active in Backend</h2>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                The GitNexus MCP server is running successfully in the cloud on Port 4747. The AutoMaintainer AI agents are using it to intelligently navigate your repository!
+              </p>
+              <div className="bg-[#0d0d0d] border border-zinc-800/80 rounded-xl p-5 mt-6 text-left shadow-lg">
+                <p className="text-xs text-zinc-500 mb-2 font-medium uppercase tracking-wider">Want to view the graph?</p>
+                <p className="text-xs text-zinc-400 mb-4 leading-relaxed">Because GitNexus is a Zero-Server tool, its Web UI strictly connects to your local machine for privacy. To view the graph locally, run this in your terminal:</p>
+                <div className="bg-black/50 p-3 rounded-lg border border-zinc-800 flex items-center gap-3">
+                  <Terminal className="w-4 h-4 text-zinc-500 shrink-0" />
+                  <code className="text-xs text-emerald-400 font-mono">npx gitnexus@latest serve</code>
+                </div>
+              </div>
+            </div>
           </main>
         ) : (
         <main className="flex-1 overflow-y-auto p-8">
