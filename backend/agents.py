@@ -520,8 +520,12 @@ app = workflow.compile()
 
 
 async def run_agent_loop(repo_name: str, ws_manager, target_issue: int | None = None):
-    if "github.com/" in repo_name:
-        repo_name = repo_name.split("github.com/")[-1].strip("/")
+    if repo_name.startswith("http://") or repo_name.startswith("https://"):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(repo_name)
+        if parsed.netloc in ["github.com", "www.github.com"]:
+            repo_name = parsed.path.strip("/")
 
     initial_state = {
         "repo_name": repo_name,
