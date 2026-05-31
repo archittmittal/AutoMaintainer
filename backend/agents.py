@@ -50,14 +50,16 @@ def run_llm(system_prompt: str, user_prompt: str):
 
 async def run_llm_with_tools(system_prompt: str, user_prompt: str):
     try:
-        from mcp.client.sse import sse_client
+        from mcp.client.stdio import stdio_client, StdioServerParameters
         from mcp.client.session import ClientSession
         from langchain_mcp_adapters.tools import load_mcp_tools
-
-        async with httpx.AsyncClient() as client:
-            await client.get("http://localhost:4747/sse", timeout=2.0)
-
-        async with sse_client("http://localhost:4747/sse") as (read, write):
+        
+        server_params = StdioServerParameters(
+            command="npx",
+            args=["-y", "gitnexus@latest", "mcp"]
+        )
+        
+        async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await load_mcp_tools(session)
