@@ -579,7 +579,7 @@ async def run_agent_loop(repo_name: str, ws_manager, target_issue: int | None = 
     )
 
     last_idx = 0
-    for s in app.stream(initial_state):
+    async for s in app.astream(initial_state):
         node_name = list(s.keys())[0]
         state = s[node_name]
 
