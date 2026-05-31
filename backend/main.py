@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from typing import Optional
 from agents import run_agent_loop
 import asyncio
 import json
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 class ConnectionManager:
     def __init__(self):
@@ -37,16 +39,19 @@ class ConnectionManager:
             except Exception:
                 pass
 
+
 manager = ConnectionManager()
+
 
 class StartRequest(BaseModel):
     repo_name: str
+    target_issue: Optional[int] = None
+
 
 @app.post("/start")
 async def start_agents(req: StartRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_agent_loop, req.repo_name, manager)
+    background_tasks.add_task(run_agent_loop, req.repo_name, manager, req.target_issue)
     return {"status": "started"}
-
 
 
 @app.websocket("/ws")
@@ -60,8 +65,11 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
+
 # Serve the static Next.js frontend if the out directory exists
 if os.path.exists("../dashboard/out"):
-    app.mount("/", StaticFiles(directory="../dashboard/out", html=True), name="dashboard")
-elif os.path.exists("dashboard/out"): # In docker container
+    app.mount(
+        "/", StaticFiles(directory="../dashboard/out", html=True), name="dashboard"
+    )
+elif os.path.exists("dashboard/out"):  # In docker container
     app.mount("/", StaticFiles(directory="dashboard/out", html=True), name="dashboard")
