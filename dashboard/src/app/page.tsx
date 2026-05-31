@@ -8,6 +8,7 @@ export default function Home() {
   const [isRunning, setIsRunning] = useState(false);
   const [repoUrl, setRepoUrl] = useState("owner/repo");
   const [isEditingRepo, setIsEditingRepo] = useState(false);
+  const [targetIssue, setTargetIssue] = useState("");
   const [logs, setLogs] = useState([
     { time: "00:00:00", agent: "System", msg: "Connecting to backend...", color: "text-zinc-500" }
   ]);
@@ -31,7 +32,10 @@ export default function Home() {
         await fetch(`${protocol}//${host}/start`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ repo_name: repoUrl })
+          body: JSON.stringify({ 
+            repo_name: repoUrl,
+            target_issue: targetIssue ? parseInt(targetIssue.replace('#',''), 10) : null 
+          })
         });
       } catch (err) {
         console.error(err);
@@ -135,6 +139,21 @@ export default function Home() {
                     autoFocus
                   />
                 )}
+              </div>
+              <div className="flex flex-col p-2 rounded-lg hover:bg-zinc-800/50 transition-colors text-sm gap-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 text-zinc-400">
+                      <Search className="w-4 h-4 text-zinc-400" />
+                      <span>Target Issue</span>
+                    </div>
+                  </div>
+                  <input 
+                    type="text" 
+                    value={targetIssue}
+                    onChange={(e) => setTargetIssue(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    placeholder="Issue number (e.g. 1)"
+                  />
               </div>
               <LinkRow icon={<Settings className="w-4 h-4 text-zinc-400" />} label="Settings" />
             </div>
