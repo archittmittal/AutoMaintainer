@@ -10,14 +10,6 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/labeler@v5
-        with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-      - uses: coverallsapp/github-action@master
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
       - name: Add PR Size Label
         uses: pascalgn/size-label-action@v0.5.1
         env:
