@@ -115,7 +115,11 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
                 return final_res["messages"][-1].content
     except Exception as e:
         print(f"MCP Tool execution fallback: {e}")
-        return run_llm(system_prompt, user_prompt)
+        try:
+            return run_llm(system_prompt, user_prompt)
+        except Exception as e2:
+            print(f"LLM execution completely failed: {e2}")
+            return f"[ERROR] LLM execution failed: {e2}"
 
 
 async def architect_node(state: AgentState):
