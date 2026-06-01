@@ -188,9 +188,15 @@ async def architect_node(state: AgentState):
         try:
             repo_url = f"https://github.com/{repo}.git"
             subprocess.run(["git", "clone", repo_url, repo_dir], check=True)
-            subprocess.run(["gitnexus", "analyze", repo_dir], check=True)
         except Exception as e:
-            print(f"Failed to clone and analyze repo: {e}")
+            print(f"Failed to clone repo: {e}")
+            
+    if not os.path.exists(f"{repo_dir}/.gitnexus"):
+        try:
+            subprocess.run(["gitnexus", "analyze", repo_dir], check=True)
+            subprocess.run(["gitnexus", "index", repo_dir], check=True)
+        except Exception as e:
+            print(f"Failed to analyze repo with GitNexus: {e}")
 
     system_prompt = "You are the Principal Architect. Analyze the provided repository root file structure and README context. Assess the current state of the project (is it working, what tech stack is it using) and give a strict 2-sentence directive on what the team should build or fix next."
     user_prompt = f"Repo: {repo}\n\nFiles:\n{tree_content}\n\nREADME:\n{readme_content[:1000]}\n\nGenerate the architect_directive."
