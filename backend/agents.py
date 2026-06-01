@@ -193,8 +193,8 @@ async def architect_node(state: AgentState):
             
     if not os.path.exists(f"{repo_dir}/.gitnexus"):
         try:
-            subprocess.run(["gitnexus", "analyze", repo_dir], check=True)
-            subprocess.run(["gitnexus", "index", repo_dir], check=True)
+            subprocess.run(["gitnexus", "analyze"], cwd=repo_dir, check=True)
+            subprocess.run(["gitnexus", "index"], cwd=repo_dir, check=True)
         except Exception as e:
             print(f"Failed to analyze repo with GitNexus: {e}")
 
