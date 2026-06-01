@@ -20,6 +20,15 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 gh = Github(GITHUB_TOKEN) if GITHUB_TOKEN else None
 
+def get_all_groq_keys():
+    keys = []
+    if GROQ_API_KEY:
+        keys.append(GROQ_API_KEY)
+    for i in range(1, 10):
+        k = os.getenv(f"GROQ_API_KEY_{i}")
+        if k:
+            keys.append(k)
+    return keys
 
 class AgentState(TypedDict):
     repo_name: str
@@ -37,15 +46,27 @@ class AgentState(TypedDict):
 
 
 def run_llm(system_prompt: str, user_prompt: str):
-    response = completion(
-        model="groq/llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        api_key=GROQ_API_KEY,
-    )
-    return response.choices[0].message.content
+    from litellm.exceptions import RateLimitError
+    keys = get_all_groq_keys()
+    if not keys:
+        raise ValueError("No GROQ_API_KEY found in environment")
+        
+    for idx, key in enumerate(keys):
+        try:
+            response = completion(
+                model="groq/llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                api_key=key,
+            )
+            return response.choices[0].message.content
+        except RateLimitError as e:
+            if idx == len(keys) - 1:
+                raise e
+            print(f"Key {idx} rate limited, falling back to next key...")
+    return ""
 
 
 async def run_llm_with_tools(system_prompt: str, user_prompt: str):
@@ -64,7 +85,13 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
                 await session.initialize()
                 tools = await load_mcp_tools(session)
 
-                llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
+                keys = get_all_groq_keys()
+                llms = [ChatGroq(model="llama-3.3-70b-versatile", api_key=k) for k in keys]
+                if len(llms) > 1:
+                    llm = llms[0].with_fallbacks(llms[1:])
+                else:
+                    llm = llms[0]
+                
                 agent = create_react_agent(llm, tools=tools)
 
                 final_res = None
@@ -152,6 +179,18 @@ async def architect_node(state: AgentState):
         except Exception as e:
             tree_content = "Unable to fetch repo tree."
             readme_content = "Inaccessible."
+
+    # Clone the repo locally and analyze it with GitNexus so the MCP server has data
+    import subprocess
+    import shutil
+    repo_dir = f"/tmp/{repo.replace('/', '_')}"
+    if not os.path.exists(repo_dir):
+        try:
+            repo_url = f"https://github.com/{repo}.git"
+            subprocess.run(["git", "clone", repo_url, repo_dir], check=True)
+            subprocess.run(["gitnexus", "analyze", repo_dir], check=True)
+        except Exception as e:
+            print(f"Failed to clone and analyze repo: {e}")
 
     system_prompt = "You are the Principal Architect. Analyze the provided repository root file structure and README context. Assess the current state of the project (is it working, what tech stack is it using) and give a strict 2-sentence directive on what the team should build or fix next."
     user_prompt = f"Repo: {repo}\n\nFiles:\n{tree_content}\n\nREADME:\n{readme_content[:1000]}\n\nGenerate the architect_directive."
