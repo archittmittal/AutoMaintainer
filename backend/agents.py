@@ -33,6 +33,9 @@ def get_all_groq_keys():
     return keys
 
 
+import operator
+
+
 class AgentState(TypedDict):
     repo_name: str
     target_issue: int | None
@@ -45,7 +48,7 @@ class AgentState(TypedDict):
     pr_number: int
     branch_name: str
     iteration: int
-    log_messages: list
+    log_messages: Annotated[list, operator.add]
 
 
 def run_llm(system_prompt: str, user_prompt: str):
@@ -187,7 +190,7 @@ async def architect_node(state: AgentState):
             try:
                 readme = gh_repo.get_readme()
                 readme_content = readme.decoded_content.decode("utf-8")
-            except:
+            except Exception:
                 readme_content = "No README found."
         except Exception as e:
             tree_content = "Unable to fetch repo tree."
@@ -199,6 +202,7 @@ async def architect_node(state: AgentState):
 
     repo_dir = f"/tmp/{repo.replace('/', '_')}"
     repo_url = f"https://x-access-token:{GITHUB_TOKEN}@github.com/{repo}.git" if GITHUB_TOKEN else f"https://github.com/{repo}.git"
+    safe_repo_url = f"https://github.com/{repo}.git"
     
     if not os.path.exists(repo_dir):
         try:
@@ -207,16 +211,16 @@ async def architect_node(state: AgentState):
             )
             await clone_proc.communicate()
         except Exception as e:
-            print(f"Failed to clone repo: {e}")
+            print(f"Failed to clone repo {safe_repo_url}: {e}")
     else:
         try:
             pull_proc = await asyncio.create_subprocess_exec(
-                "git", "pull", "--ff-only", repo_url,
+                "git", "pull", "--ff-only",
                 cwd=repo_dir
             )
             await pull_proc.communicate()
         except Exception as e:
-            print(f"Failed to pull repo, continuing with cache: {e}")
+            print(f"Failed to pull repo {safe_repo_url}, continuing with cache: {e}")
 
     if not os.path.exists(f"{repo_dir}/.gitnexus"):
         try:
@@ -453,7 +457,7 @@ async def pm_node(state: AgentState):
     )
     state["pm_decision"] = decision
 
-    is_approved = decision.startswith("APPROVED")
+    is_approved = decision.strip().upper().startswith("APPROVED")
     msg_color = "text-amber-400" if is_approved else "text-red-400"
     state["log_messages"].append(
         {"agent": "Reviewer", "msg": f"Decision: {decision}", "color": msg_color}
@@ -489,7 +493,7 @@ async def pm_node(state: AgentState):
 
 
 def should_implement(state: AgentState):
-    return "implementer" if state.get("pm_decision", "").startswith("APPROVED") else END
+    return "implementer" if state.get("pm_decision", "").strip().upper().startswith("APPROVED") else END
 
 
 async def implementer_node(state: AgentState):
@@ -642,7 +646,7 @@ async def maintainer_node(state: AgentState):
         }
     )
 
-    is_lgtm = "LGTM" in review
+    is_lgtm = "LGTM" in review.upper()
 
     if gh and pr_number:
         try:
@@ -688,7 +692,7 @@ async def maintainer_node(state: AgentState):
 
 
 def should_iterate(state: AgentState):
-    if "LGTM" in state.get("review", ""):
+    if "LGTM" in state.get("review", "").upper():
         return END
     if state.get("iteration", 0) >= 3:
         return END
