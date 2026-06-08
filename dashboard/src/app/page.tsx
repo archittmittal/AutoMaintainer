@@ -91,6 +91,11 @@ export default function Home() {
       setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), agent: "System", msg: "Connected to AutoMaintainer Core", color: "text-emerald-500" }]);
     };
 
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+      setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), agent: "System", msg: "WebSocket connection error. Check backend connectivity.", color: "text-red-400" }]);
+    };
+
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);

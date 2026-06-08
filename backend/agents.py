@@ -257,6 +257,26 @@ async def architect_node(state: AgentState):
                 )
             print(f"Failed to analyze repo with GitNexus: {e}")
 
+            # Clean up partially created .gitnexus cache
+            gitnexus_dir = os.path.join(repo_dir, ".gitnexus")
+            if os.path.exists(gitnexus_dir):
+                try:
+                    shutil.rmtree(gitnexus_dir)
+                    info_msg = "ℹ️ Cleaned up partial GitNexus cache directory."
+                    state["log_messages"].append(
+                        {"agent": "System", "msg": info_msg, "color": "text-zinc-500"}
+                    )
+                    if ws:
+                        await ws.broadcast(
+                            {
+                                "agent": "System",
+                                "msg": info_msg,
+                                "color": "text-zinc-500",
+                            }
+                        )
+                except Exception as clean_err:
+                    print(f"Failed to clean up partial GitNexus cache: {clean_err}")
+
     # Generate AST Map for LLM Context
     ast_context_str = "No AST available."
     if os.path.isdir(repo_dir):
