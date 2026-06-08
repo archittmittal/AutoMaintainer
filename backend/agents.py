@@ -11,7 +11,7 @@ import asyncio
 from github import Github
 import uuid
 import json
-from backend.ast_indexer import CodebaseMapper
+from ast_indexer import CodebaseMapper
 from contextvars import ContextVar
 
 current_ws = ContextVar("current_ws")
