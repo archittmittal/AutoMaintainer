@@ -21,6 +21,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 gh = Github(GITHUB_TOKEN) if GITHUB_TOKEN else None
 
+
 def get_all_groq_keys():
     keys = []
     if GROQ_API_KEY:
@@ -30,6 +31,7 @@ def get_all_groq_keys():
         if k:
             keys.append(k)
     return keys
+
 
 class AgentState(TypedDict):
     repo_name: str
@@ -48,10 +50,11 @@ class AgentState(TypedDict):
 
 def run_llm(system_prompt: str, user_prompt: str):
     from litellm.exceptions import RateLimitError
+
     keys = get_all_groq_keys()
     if not keys:
         raise ValueError("No GROQ_API_KEY found in environment")
-        
+
     for idx, key in enumerate(keys):
         try:
             response = completion(
@@ -75,24 +78,23 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
         from mcp.client.stdio import stdio_client, StdioServerParameters
         from mcp.client.session import ClientSession
         from langchain_mcp_adapters.tools import load_mcp_tools
-        
-        server_params = StdioServerParameters(
-            command="gitnexus",
-            args=["mcp"]
-        )
-        
+
+        server_params = StdioServerParameters(command="gitnexus", args=["mcp"])
+
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await load_mcp_tools(session)
 
                 keys = get_all_groq_keys()
-                llms = [ChatGroq(model="llama-3.3-70b-versatile", api_key=k) for k in keys]
+                llms = [
+                    ChatGroq(model="llama-3.3-70b-versatile", api_key=k) for k in keys
+                ]
                 if len(llms) > 1:
                     llm = llms[0].with_fallbacks(llms[1:])
                 else:
                     llm = llms[0]
-                
+
                 agent = create_react_agent(llm, tools=tools)
 
                 final_res = None
@@ -188,6 +190,7 @@ async def architect_node(state: AgentState):
     # Clone the repo locally and analyze it with GitNexus so the MCP server has data
     import subprocess
     import shutil
+
     repo_dir = f"/tmp/{repo.replace('/', '_')}"
     if not os.path.exists(repo_dir):
         try:
@@ -195,7 +198,7 @@ async def architect_node(state: AgentState):
             subprocess.run(["git", "clone", repo_url, repo_dir], check=True)
         except Exception as e:
             print(f"Failed to clone repo: {e}")
-            
+
     if not os.path.exists(f"{repo_dir}/.gitnexus"):
         try:
             subprocess.run(["gitnexus", "analyze"], cwd=repo_dir, check=True)
@@ -205,32 +208,63 @@ async def architect_node(state: AgentState):
 
     # Generate AST Map for LLM Context
     ast_context_str = "No AST available."
-    try:
-        mapper = CodebaseMapper(repo_dir)
-        arch_map = mapper.generate_architecture_map()
-        
-        ast_lines = ["\nRepository AST Structure:"]
-        for file_path, data in arch_map.items():
-            classes = data.get("classes", [])
-            functions = data.get("functions", [])
-            if not classes and not functions:
-                continue
-                
-            ast_lines.append(f"File: {file_path}")
-            if classes:
-                ast_lines.append("  Classes:")
-                for c in classes:
-                    ast_lines.append(f"    - {c['name']} (L{c['start_line']}-L{c['end_line']})")
-            if functions:
-                ast_lines.append("  Functions:")
-                for f in functions:
-                    ast_lines.append(f"    - {f['name']} (L{f['start_line']}-L{f['end_line']})")
-                    
-        ast_context_str = "\n".join(ast_lines)
-    except Exception as e:
-        print(f"AST parsing failed: {e}")
+    if os.path.isdir(repo_dir):
+        try:
+            mapper = CodebaseMapper(repo_dir)
+            arch_map = mapper.generate_architecture_map()
 
-    system_prompt = "You are the Principal Architect. Analyze the provided repository root file structure, AST structure, and README context. Assess the current state of the project (is it working, what tech stack is it using) and give a strict 2-sentence directive on what the team should build or fix next."
+            MAX_CHARS = 15000
+            current_chars = 0
+            ast_lines = ["\nRepository AST Structure:"]
+
+            for file_path, data in arch_map.items():
+                classes = data.get("classes", [])
+                functions = data.get("functions", [])
+                if not classes and not functions:
+                    continue
+
+                # Check if adding this file will exceed the limit
+                file_chunk = f"File: {file_path}\n"
+                if classes:
+                    file_chunk += "  Classes:\n"
+                    for c in classes:
+                        file_chunk += (
+                            f"    - {c['name']} (L{c['start_line']}-L{c['end_line']})\n"
+                        )
+                if functions:
+                    file_chunk += "  Functions:\n"
+                    for f in functions:
+                        file_chunk += (
+                            f"    - {f['name']} (L{f['start_line']}-L{f['end_line']})\n"
+                        )
+
+                if current_chars + len(file_chunk) > MAX_CHARS:
+                    ast_lines.append("\n...AST truncated due to token limit")
+                    break
+
+                ast_lines.append(file_chunk.strip())
+                current_chars += len(file_chunk)
+
+            ast_context_str = "\n".join(ast_lines)
+        except Exception as e:
+            print(f"AST parsing failed locally: {e}")
+            state["log_messages"].append(
+                {
+                    "agent": "Architect",
+                    "msg": f"AST parsing failed: {str(e)}",
+                    "color": "text-amber-500",
+                }
+            )
+    else:
+        state["log_messages"].append(
+            {
+                "agent": "Architect",
+                "msg": f"AST generation skipped: repo_dir {repo_dir} not found.",
+                "color": "text-amber-500",
+            }
+        )
+
+    system_prompt = 'You are the Principal Architect. Analyze the provided repository root file structure, AST structure, and README context. Assess the current state of the project (is it working, what tech stack is it using) and give a strict 2-sentence directive on what the team should build or fix next. You MUST explicitly include precise file paths and start–end line ranges (e.g., "file.py:10-25") for any delegated changes. Ensure these exact line-number citations are present in the generated directive.'
     user_prompt = f"Repo: {repo}\n\nFiles:\n{tree_content}\n\nREADME:\n{readme_content[:1000]}\n\n{ast_context_str}\n\nGenerate the architect_directive."
 
     directive = await run_llm_with_tools(system_prompt, user_prompt)
