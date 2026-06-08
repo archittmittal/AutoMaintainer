@@ -53,6 +53,7 @@ Create a `.env` file in the root directory:
 ```bash
 GROQ_API_KEY=your_groq_api_key_here
 GITHUB_TOKEN=your_github_token_here
+NEXT_PUBLIC_BACKEND_URL=http://your-custom-backend.com:8000  # Optional: For remote backends
 ```
 
 ### 3. Run the Backend (FastAPI + LangGraph)
@@ -70,6 +71,7 @@ cd dashboard
 npm install
 npm run dev
 ```
+*Note: In local development, the Next.js frontend runs on port 3000 and automatically proxies API traffic to the FastAPI backend running on port 8000. You can override this using the `NEXT_PUBLIC_BACKEND_URL` environment variable.*
 
 ---
 
