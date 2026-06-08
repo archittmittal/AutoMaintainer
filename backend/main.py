@@ -200,9 +200,14 @@ import re
 
 @app.get("/repo/{repo_name:path}/tree")
 def get_repo_tree(repo_name: str):
-    if not re.match(r"^[\w\-]+(?:/[\w\-]+)*$", repo_name):
+    base_tmp = os.path.abspath("/tmp")
+    # Sanitize and strictly confine to /tmp
+    clean_name = repo_name.replace('/', '_').replace('\\', '_')
+    repo_dir = os.path.abspath(os.path.join(base_tmp, clean_name))
+    
+    if not repo_dir.startswith(base_tmp + os.sep):
         return {"error": "Invalid repository name"}
-    repo_dir = f"/tmp/{repo_name.replace('/', '_')}"
+        
     if not os.path.exists(repo_dir):
         return {"error": "Repository not cloned yet. Start an agent loop first."}
     
@@ -234,13 +239,17 @@ def get_repo_tree(repo_name: str):
 
 @app.get("/repo/{repo_name:path}/file")
 def get_repo_file(repo_name: str, file_path: str):
-    if not re.match(r"^[\w\-]+(?:/[\w\-]+)*$", repo_name):
+    base_tmp = os.path.abspath("/tmp")
+    clean_name = repo_name.replace('/', '_').replace('\\', '_')
+    repo_dir = os.path.abspath(os.path.join(base_tmp, clean_name))
+    
+    if not repo_dir.startswith(base_tmp + os.sep):
         return {"error": "Invalid repository name"}
-    repo_dir = os.path.abspath(f"/tmp/{repo_name.replace('/', '_')}")
+        
     target_path = os.path.abspath(os.path.join(repo_dir, file_path))
     
-    # Path traversal security check
-    if not target_path.startswith(repo_dir):
+    # Strict path traversal security check for CodeQL
+    if not target_path.startswith(repo_dir + os.sep) and target_path != repo_dir:
         return {"error": "Invalid file path"}
     
     if not os.path.exists(target_path) or not os.path.isfile(target_path):
