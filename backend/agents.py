@@ -87,6 +87,12 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
                 tools = await load_mcp_tools(session)
 
                 keys = get_all_groq_keys()
+                if not keys:
+                    ws = current_ws.get(None)
+                    if ws:
+                        await ws.broadcast({"agent": "System", "msg": "[ERROR] No GROQ_API_KEY found in environment. Agents cannot run.", "color": "text-red-500"})
+                    raise ValueError("No GROQ_API_KEY found in environment")
+                    
                 llms = [
                     ChatGroq(model="llama-3.3-70b-versatile", api_key=k) for k in keys
                 ]
@@ -192,15 +198,25 @@ async def architect_node(state: AgentState):
     import shutil
 
     repo_dir = f"/tmp/{repo.replace('/', '_')}"
+    repo_url = f"https://x-access-token:{GITHUB_TOKEN}@github.com/{repo}.git" if GITHUB_TOKEN else f"https://github.com/{repo}.git"
+    
     if not os.path.exists(repo_dir):
         try:
-            repo_url = f"https://github.com/{repo}.git"
             clone_proc = await asyncio.create_subprocess_exec(
                 "git", "clone", repo_url, repo_dir
             )
             await clone_proc.communicate()
         except Exception as e:
             print(f"Failed to clone repo: {e}")
+    else:
+        try:
+            pull_proc = await asyncio.create_subprocess_exec(
+                "git", "pull", "--ff-only", repo_url,
+                cwd=repo_dir
+            )
+            await pull_proc.communicate()
+        except Exception as e:
+            print(f"Failed to pull repo, continuing with cache: {e}")
 
     if not os.path.exists(f"{repo_dir}/.gitnexus"):
         try:
@@ -215,6 +231,13 @@ async def architect_node(state: AgentState):
             )
             await index_proc.communicate()
         except Exception as e:
+            warn_msg = f"⚠️ GitNexus indexing failed (agents will use raw LLM context): {e}"
+            state["log_messages"].append(
+                {"agent": "System", "msg": warn_msg, "color": "text-amber-400"}
+            )
+            ws = current_ws.get(None)
+            if ws:
+                await ws.broadcast({"agent": "System", "msg": warn_msg, "color": "text-amber-400"})
             print(f"Failed to analyze repo with GitNexus: {e}")
 
     # Generate AST Map for LLM Context
