@@ -72,6 +72,12 @@ export default function Home() {
     } else {
       setIsRunning(false);
       setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), agent: "System", msg: "Agent Loop Halted.", color: "text-red-500" }]);
+      try {
+        const backendUrl = getBackendUrl();
+        await fetch(`${backendUrl}/stop`, { method: "POST" });
+      } catch (err) {
+        console.error("Failed to stop agents:", err);
+      }
     }
   };
 
