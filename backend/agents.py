@@ -134,6 +134,8 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
 
                 return final_res["messages"][-1].content
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"MCP Tool execution fallback: {e}")
         try:
             return run_llm(system_prompt, user_prompt)
