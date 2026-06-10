@@ -15,6 +15,8 @@ from agents import run_agent_loop
 import asyncio
 import json
 import os
+import sys
+import platform
 import subprocess
 import re
 import logging
@@ -85,6 +87,7 @@ class StartRequest(BaseModel):
     repo_name: str
     target_issue: Optional[int] = None
 
+
 class FileUpdateRequest(BaseModel):
     file_path: str
     content: str
@@ -104,6 +107,7 @@ async def start_agents(req: StartRequest):
     )
     return {"status": "started"}
 
+
 @app.post("/repo/{repo_name:path}/file")
 async def update_repo_file(repo_name: str, payload: FileUpdateRequest):
     token = os.getenv("GITHUB_TOKEN")
@@ -118,7 +122,9 @@ async def update_repo_file(repo_name: str, payload: FileUpdateRequest):
         file = repo.get_contents(payload.file_path)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"File not found in repo: {e}")
-    message = payload.commit_message or f"Update {payload.file_path} via AutoMaintainer IDE"
+    message = (
+        payload.commit_message or f"Update {payload.file_path} via AutoMaintainer IDE"
+    )
     try:
         repo.update_file(file.path, message, payload.content, file.sha)
     except Exception as e:
@@ -153,6 +159,131 @@ async def websocket_endpoint(websocket: WebSocket):
             await manager.broadcast({"type": "system", "msg": f"Received: {data}"})
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+@app.websocket("/api/terminal/ws")
+async def terminal_ws(websocket: WebSocket, repo_url: str = ""):
+    origin = websocket.headers.get("origin")
+    if origin and not (
+        origin.startswith("http://localhost")
+        or "huggingface.co" in origin
+        or origin.startswith("http://127.0.0.1")
+    ):
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+
+    cwd = None
+    if repo_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(repo_url)
+        repo_name = parsed.path.strip("/")
+        if repo_name.endswith(".git"):
+            repo_name = repo_name[:-4]
+
+        parts = [p for p in repo_name.split("/") if p]
+        if len(parts) >= 2:
+            repo_name = f"{parts[-2]}/{parts[-1]}"
+
+        clean_name = repo_name.replace("/", "_").replace("\\", "_")
+        base_tmp = os.path.abspath("/tmp")
+        repo_dir = os.path.abspath(os.path.join(base_tmp, clean_name))
+
+        if repo_dir.startswith(base_tmp + os.sep) and os.path.exists(repo_dir):
+            cwd = repo_dir
+
+    if sys.platform == "win32":
+        import pywinpty
+
+        cols, rows = 80, 24
+        pty = pywinpty.PTY(cols, rows)
+        pty.spawn(pywinpty.winpty.get_default_cmd(), cwd=cwd)
+
+        async def read_from_pty():
+            while True:
+                try:
+                    data = await asyncio.to_thread(pty.read)
+                    if data:
+                        await websocket.send_text(data)
+                    else:
+                        await asyncio.sleep(0.01)
+                except Exception:
+                    break
+
+        read_task = asyncio.create_task(read_from_pty())
+
+        try:
+            while True:
+                message = await websocket.receive_text()
+                if message.startswith('{"type":"resize"'):
+                    msg_data = json.loads(message)
+                    pty.set_size(msg_data["cols"], msg_data["rows"])
+                else:
+                    await asyncio.to_thread(pty.write, message)
+        except Exception:
+            pass
+        finally:
+            read_task.cancel()
+            try:
+                del pty
+            except Exception:
+                pass
+    else:
+        import pty
+        import fcntl
+        import termios
+        import struct
+        import signal
+
+        pid, fd = pty.fork()
+        if pid == 0:
+            if cwd:
+                os.chdir(cwd)
+            os.environ["TERM"] = "xterm-256color"
+            os.execv("/bin/bash", ["/bin/bash"])
+        else:
+
+            async def read_from_pty():
+                while True:
+                    try:
+                        data = await asyncio.to_thread(os.read, fd, 1024)
+                        if data:
+                            await websocket.send_text(
+                                data.decode("utf-8", errors="replace")
+                            )
+                        else:
+                            break
+                    except Exception:
+                        break
+
+            read_task = asyncio.create_task(read_from_pty())
+
+            try:
+                while True:
+                    message = await websocket.receive_text()
+                    if message.startswith('{"type":"resize"'):
+                        msg_data = json.loads(message)
+                        winsize = struct.pack(
+                            "HHHH", msg_data["rows"], msg_data["cols"], 0, 0
+                        )
+                        fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+                    else:
+                        await asyncio.to_thread(os.write, fd, message.encode("utf-8"))
+            except Exception:
+                pass
+            finally:
+                read_task.cancel()
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    os.waitpid(pid, 0)
+                except Exception:
+                    pass
 
 
 @app.get("/repo/{repo_name:path}/tree")
