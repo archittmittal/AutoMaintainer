@@ -59,7 +59,7 @@ def run_llm(system_prompt: str, user_prompt: str):
         raise ValueError("No GROQ_API_KEY found in environment")
 
     for idx, key in enumerate(keys):
-        for model_name in ["groq/llama-3.3-70b-versatile", "groq/llama3-8b-8192"]:
+        for model_name in ["groq/llama-3.3-70b-versatile", "groq/llama-3.1-8b-instant"]:
             try:
                 response = completion(
                     model=model_name,
@@ -105,7 +105,7 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
                 llms = [
                     ChatGroq(model="llama-3.3-70b-versatile", api_key=k) for k in keys
                 ] + [
-                    ChatGroq(model="llama3-8b-8192", api_key=k) for k in keys
+                    ChatGroq(model="llama-3.1-8b-instant", api_key=k) for k in keys
                 ]
                 if len(llms) > 1:
                     llm = llms[0].with_fallbacks(llms[1:])
