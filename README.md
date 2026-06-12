@@ -40,7 +40,22 @@ Built with **LangGraph**, **FastAPI**, **Next.js**, and powered by **Llama 3 (vi
 
 ## Quick Start
 
-### 1. Prerequisites
+### Option 1: Run via Docker (Recommended)
+The fastest way to get started is by pulling the pre-built Docker image from the GitHub Container Registry. This includes both the Next.js frontend and FastAPI backend in a single container.
+
+```bash
+docker run -p 7860:7860 \
+  -e GROQ_API_KEY="your_groq_api_key_here" \
+  -e GITHUB_TOKEN="your_github_token_here" \
+  ghcr.io/pxa-labs/automaintainer:latest
+```
+Open your browser to `http://localhost:7860`.
+
+---
+
+### Option 2: Manual Setup
+
+**1. Prerequisites**
 - [Node.js](https://nodejs.org/en/) (v18+)
 - [Python](https://www.python.org/) (3.10+)
 - A [Groq API Key](https://console.groq.com/keys)
