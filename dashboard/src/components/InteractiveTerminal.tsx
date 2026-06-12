@@ -42,10 +42,21 @@ export default function InteractiveTerminal({ repoUrl }: InteractiveTerminalProp
     fitAddon.current = fit;
 
     // Build the WebSocket URL
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = process.env.NEXT_PUBLIC_BACKEND_URL
-      ? process.env.NEXT_PUBLIC_BACKEND_URL.replace("http://", "").replace("https://", "")
-      : "localhost:8000";
+    let backendUrl = "http://localhost:8000";
+    if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+      backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL.replace(/\/$/, "");
+    } else if (typeof window !== "undefined") {
+      const port = window.location.port;
+      const hostname = window.location.hostname;
+      if (port === "3000") {
+        backendUrl = `${window.location.protocol}//${hostname}:8000`;
+      } else {
+        backendUrl = `${window.location.protocol}//${window.location.host}`;
+      }
+    }
+    
+    const protocol = backendUrl.startsWith("https") ? "wss:" : "ws:";
+    const host = backendUrl.replace(/^https?:\/\//, "");
     
     let wsUrl = `${protocol}//${host}/api/terminal/ws`;
     if (repoUrl) {
