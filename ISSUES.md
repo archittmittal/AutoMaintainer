@@ -12,7 +12,7 @@ Legend: `[ ]` = Not opened | `[o]` = Opened on GitHub | `[/]` = In Progress | `[
 | # | Title | Priority | Status | Fork Issue | Upstream Issue |
 |---|-------|----------|--------|------------|----------------|
 | 1 | CORS misconfiguration blocks Hugging Face deployments | P0 | `[o]` | [#2](https://github.com/archittmittal/AutoMaintainer/issues/2) | [#51](https://github.com/PxA-Labs/AutoMaintainer/issues/51) |
-| 2 | Implementer commits dummy code instead of real file changes | P0 | `[o]` | [#3](https://github.com/archittmittal/AutoMaintainer/issues/3) | [#52](https://github.com/PxA-Labs/AutoMaintainer/issues/52) |
+| 2 | Implementer commits dummy code instead of real file changes | P0 | `[/]` | [#3](https://github.com/archittmittal/AutoMaintainer/issues/3) | [#52](https://github.com/PxA-Labs/AutoMaintainer/issues/52) |
 | 3 | `/tmp` repo clones never cleaned up — disk exhaustion | P1 | `[ ]` | — | — |
 
 ---
@@ -45,3 +45,4 @@ Legend: `[ ]` = Not opened | `[o]` = Opened on GitHub | `[/]` = In Progress | `[
 | Date | Issues Opened | Issues Resolved |
 |------|---------------|-----------------|
 | 2026-06-12 | Fork [#2](https://github.com/archittmittal/AutoMaintainer/issues/2), [#3](https://github.com/archittmittal/AutoMaintainer/issues/3) · Upstream [#51](https://github.com/PxA-Labs/AutoMaintainer/issues/51), [#52](https://github.com/PxA-Labs/AutoMaintainer/issues/52) | — |
+| 2026-08-14 | Working on Fork [#3](https://github.com/archittmittal/AutoMaintainer/issues/3) · Upstream [#52](https://github.com/PxA-Labs/AutoMaintainer/issues/52) — Implementer real-file patching | CI Black formatting fixed (unblocks all PRs) |

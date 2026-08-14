@@ -250,6 +250,52 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
             return f"[ERROR] LLM execution failed: {e2}"
 
 
+def _extract_file_paths_from_text(text: str) -> list:
+    """Extract file paths mentioned in a directive or idea string.
+
+    Looks for patterns like 'backend/main.py', 'backend/main.py:10-25',
+    or bare filenames with known extensions.
+    """
+    import re
+
+    # Match path-like strings: optional leading 'file ' or backtick, then path with extension
+    pattern = re.compile(
+        r"(?:^|[\s`'\"(])([\w./\-]+\.(?:py|js|ts|tsx|jsx|json|yaml|yml|md|txt|sh|env|toml|cfg|ini))"
+        r"(?::[\d\-]+)?",
+        re.MULTILINE | re.IGNORECASE,
+    )
+    found = pattern.findall(text)
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for p in found:
+        p = p.strip("/")
+        if p not in seen:
+            seen.add(p)
+            unique.append(p)
+    return unique
+
+
+def _read_file_context(repo_dir: str, file_paths: list) -> dict:
+    """Read the current content of the given files from the local clone.
+
+    Returns a dict mapping relative path -> file content string.
+    Only includes files that actually exist; skips missing or binary files.
+    """
+    context = {}
+    for rel_path in file_paths:
+        abs_path = os.path.join(repo_dir, rel_path)
+        if not os.path.isfile(abs_path):
+            continue
+        try:
+            with open(abs_path, "r", encoding="utf-8") as fh:
+                context[rel_path] = fh.read()
+        except (UnicodeDecodeError, OSError):
+            # Skip binary or unreadable files
+            pass
+    return context
+
+
 async def architect_node(state: AgentState):
     new_logs = []
     repo = state["repo_name"]
@@ -668,36 +714,119 @@ def should_implement(state: AgentState):
 async def implementer_node(state: AgentState):
     new_logs = []
     idea = state["idea"]
+    directive = state.get("architect_directive", "")
     issue_number = state.get("issue_number")
     iteration = state.get("iteration", 0)
-    prev_code = state.get("code", "")
+    prev_patches = state.get("code", "")
     review = state.get("review", "")
 
-    if iteration > 0:
-        system_prompt = "You are the Implementer Agent. Your previous code was rejected by the Maintainer. Fix it based on their feedback. Output ONLY the fixed Python script."
-        user_prompt = f"Previous Code:\n{prev_code}\n\nMaintainer Feedback:\n{review}"
-    else:
-        system_prompt = "You are the Implementer Agent. Write a tiny python script that implements the core logic of the idea. Keep it very short. Output ONLY the Python script."
-        user_prompt = f"Write code for: {idea}"
-
-    code = await run_llm_with_tools(system_prompt, user_prompt)
-    state["code"] = code
-
     new_logs.append({"type": "ui_update", "agentStatus": {"Implementer": "active"}})
+
+    # Determine the local clone path so we can provide real file context
+    repo_dir = os.path.abspath(
+        os.path.join("/tmp", state["repo_name"].replace("/", "_").replace("\\", "_"))
+    )
+
+    # Gather real file context from the clone for files mentioned in the directive / idea
+    combined_text = f"{directive}\n{idea}"
+    mentioned_paths = _extract_file_paths_from_text(combined_text)
+    file_context = (
+        _read_file_context(repo_dir, mentioned_paths) if mentioned_paths else {}
+    )
+
+    file_context_block = ""
+    if file_context:
+        parts = []
+        for rel_path, content in file_context.items():
+            # Truncate very large files to stay within token limits
+            truncated = (
+                content[:6000] + "\n... [truncated]" if len(content) > 6000 else content
+            )
+            parts.append(f"### {rel_path}\n```\n{truncated}\n```")
+        file_context_block = "\n\n".join(parts)
+
+    # Shared output format instructions
+    output_format = (
+        "You MUST respond with a valid JSON array of file patches and nothing else.\n"
+        "Each element must have exactly two keys:\n"
+        "  \"file\": relative path from the repository root (e.g. 'backend/main.py')\n"
+        '  "content": the complete, updated content of that file (not a diff, the full new file)\n'
+        "Example response format:\n"
+        '[{"file": "backend/main.py", "content": "import os\\n...full file content..."}]\n'
+        "Do NOT include any explanation, markdown, or text outside the JSON array."
+    )
+
+    if iteration > 0:
+        system_prompt = (
+            "You are the Implementer Agent. Your previous code changes were rejected by the "
+            "Maintainer. Revise the affected files based on their feedback and output the corrected "
+            "complete file contents.\n\n" + output_format
+        )
+        user_prompt = (
+            f"Maintainer Feedback:\n{review}\n\n"
+            f"Previous patches submitted:\n{prev_patches}\n\n"
+            f"Current file context (read these carefully before editing):\n{file_context_block}"
+        )
+    else:
+        system_prompt = (
+            "You are the Implementer Agent. Your task is to implement the changes described in "
+            "the issue / directive by modifying the ACTUAL repository files provided below. "
+            "Do NOT create new dummy files. Edit only what is necessary to resolve the issue. "
+            "Return the complete updated content of every file you touch.\n\n"
+            + output_format
+        )
+        user_prompt = (
+            f"Repository: {state['repo_name']}\n\n"
+            f"Architect Directive:\n{directive}\n\n"
+            f"Issue / Feature Description:\n{idea}\n\n"
+            f"Current content of relevant files:\n{file_context_block if file_context_block else 'No files identified. Identify the correct files from the directive and include their full updated content in your response.'}"
+        )
+
+    raw_response = await run_llm_with_tools(system_prompt, user_prompt)
+
+    # Parse the JSON patch list from the LLM response
+    patches = []
+    try:
+        # Strip surrounding markdown fences if the model wrapped the JSON
+        clean = raw_response.strip()
+        if clean.startswith("```"):
+            clean = clean.split("```")[1]
+            if clean.startswith("json"):
+                clean = clean[4:]
+        patches = json.loads(clean)
+        if not isinstance(patches, list):
+            raise ValueError("Response is not a JSON array")
+    except Exception as parse_err:
+        # Fallback: wrap entire response as a single patch for the first mentioned file
+        fallback_path = (
+            mentioned_paths[0] if mentioned_paths else f"fix_issue_{issue_number}.py"
+        )
+        patches = [{"file": fallback_path, "content": raw_response}]
+        new_logs.append(
+            {
+                "agent": "Implementer",
+                "msg": f"Could not parse structured patches ({parse_err}); falling back to single-file commit.",
+                "color": "text-amber-400",
+            }
+        )
+
+    # Store the raw response in state so the Maintainer can review it
+    state["code"] = raw_response
 
     if iteration > 0:
         new_logs.append(
             {
                 "agent": "Implementer",
-                "msg": f"Fixed code based on feedback (Iteration {iteration}).",
+                "msg": f"Revised {len(patches)} file(s) based on Maintainer feedback (Iteration {iteration}).",
                 "color": "text-blue-400",
             }
         )
     else:
+        patched_names = ", ".join(p.get("file", "?") for p in patches[:5])
         new_logs.append(
             {
                 "agent": "Implementer",
-                "msg": "Generated initial code implementation.",
+                "msg": f"Generated patches for {len(patches)} file(s): {patched_names}",
                 "color": "text-blue-400",
             }
         )
@@ -713,39 +842,83 @@ async def implementer_node(state: AgentState):
             }
         )
 
-    if gh and issue_number:
+    if gh and issue_number and patches:
         try:
             gh_repo = gh.get_repo(state["repo_name"])
-
-            code_to_commit = code
-            if "```python" in code:
-                code_to_commit = code.split("```python")[1].split("```")[0].strip()
-            elif "```" in code:
-                code_to_commit = code.split("```")[1].split("```")[0].strip()
-
-            path = f"feature_issue_{issue_number}.py"
 
             if iteration == 0:
                 default_branch = gh_repo.default_branch
                 sb = gh_repo.get_branch(default_branch)
-                branch_name = f"feature/issue-{issue_number}-{uuid.uuid4().hex[:4]}"
+                branch_name = f"fix/issue-{issue_number}-{uuid.uuid4().hex[:4]}"
                 state["branch_name"] = branch_name
                 gh_repo.create_git_ref(
                     ref=f"refs/heads/{branch_name}", sha=sb.commit.sha
                 )
+            else:
+                branch_name = state["branch_name"]
 
-                gh_repo.create_file(
-                    path=path,
-                    message=f"Implement Feature for Issue #{issue_number}",
-                    content=code_to_commit,
-                    branch=branch_name,
+            committed_files = []
+            for patch in patches:
+                patch_file = patch.get("file", "").strip().lstrip("/")
+                patch_content = patch.get("content", "")
+                if not patch_file or not patch_content:
+                    continue
+
+                commit_msg = (
+                    f"Fix issue #{issue_number}: update {patch_file}"
+                    if iteration == 0
+                    else f"Fix: address maintainer feedback on {patch_file} (iteration {iteration})"
                 )
 
+                try:
+                    existing = gh_repo.get_contents(patch_file, ref=branch_name)
+                    gh_repo.update_file(
+                        path=existing.path,
+                        message=commit_msg,
+                        content=patch_content,
+                        sha=existing.sha,
+                        branch=branch_name,
+                    )
+                except Exception:
+                    # File does not exist on this branch yet — create it
+                    gh_repo.create_file(
+                        path=patch_file,
+                        message=commit_msg,
+                        content=patch_content,
+                        branch=branch_name,
+                    )
+
+                committed_files.append(patch_file)
+
+                # Sync to local clone so the Web IDE shows up-to-date content
+                if os.path.exists(repo_dir):
+                    local_path = os.path.join(repo_dir, patch_file)
+                    try:
+                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                        with open(local_path, "w", encoding="utf-8") as fh:
+                            fh.write(patch_content)
+                    except Exception as local_err:
+                        print(f"Failed to sync {patch_file} locally: {local_err}")
+
+            new_logs.append(
+                {
+                    "agent": "System",
+                    "msg": f"Committed changes to {len(committed_files)} file(s) on branch '{branch_name}'.",
+                    "color": "text-zinc-500",
+                }
+            )
+
+            if iteration == 0:
+                changed_files_md = "\n".join(f"- `{f}`" for f in committed_files)
                 pr = gh_repo.create_pull(
-                    title=f"Implement Feature Request #{issue_number}",
-                    body=f"This PR resolves #{issue_number}.\n\nCloses #{issue_number}",
+                    title=f"Fix issue #{issue_number}",
+                    body=(
+                        f"This PR addresses #{issue_number}.\n\n"
+                        f"### Files changed\n{changed_files_md}\n\n"
+                        f"Closes #{issue_number}"
+                    ),
                     head=branch_name,
-                    base=default_branch,
+                    base=gh_repo.default_branch,
                 )
                 state["pr_number"] = pr.number
                 new_logs.append(
@@ -766,62 +939,32 @@ async def implementer_node(state: AgentState):
                     }
                 )
             else:
-                branch_name = state["branch_name"]
-                file = gh_repo.get_contents(path, ref=branch_name)
-                gh_repo.update_file(
-                    path=file.path,
-                    message=f"Fix: Address maintainer feedback (Iteration {iteration})",
-                    content=code_to_commit,
-                    sha=file.sha,
-                    branch=branch_name,
-                )
                 pr_number = state["pr_number"]
                 pr = gh_repo.get_pull(pr_number)
                 pr.create_issue_comment(
-                    f"I have pushed a new commit to address the feedback. (Iteration {iteration})"
+                    f"Pushed revised changes to address Maintainer feedback (iteration {iteration}). "
+                    f"Files updated: {', '.join(committed_files)}"
                 )
                 new_logs.append(
                     {
                         "agent": "System",
-                        "msg": f"Pushed fix to PR #{pr_number}",
+                        "msg": f"Pushed revised fix to PR #{pr_number}",
                         "color": "text-emerald-500",
                     }
                 )
-
-            # Local sync to update the workspace clone on disk
-            repo_dir = os.path.abspath(
-                os.path.join(
-                    "/tmp", state["repo_name"].replace("/", "_").replace("\\", "_")
-                )
-            )
-            if os.path.exists(repo_dir):
-                local_path = os.path.join(repo_dir, path)
-                try:
-                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                    with open(local_path, "w", encoding="utf-8") as f:
-                        f.write(code_to_commit)
-                    new_logs.append(
-                        {
-                            "agent": "System",
-                            "msg": f"Synced generated code locally: {path}",
-                            "color": "text-zinc-500",
-                        }
-                    )
-                except Exception as local_err:
-                    print(f"Failed to sync code locally: {local_err}")
 
         except Exception as e:
             new_logs.append(
                 {
                     "agent": "System",
-                    "msg": f"Failed GitHub API Action: {str(e)}",
+                    "msg": f"Failed GitHub API action: {str(e)}",
                     "color": "text-red-500",
                 }
             )
 
     new_logs.append({"type": "ui_update", "agentStatus": {"Implementer": "idle"}})
     return {
-        "code": code,
+        "code": raw_response,
         "branch_name": state.get("branch_name", ""),
         "pr_number": state.get("pr_number", 0),
         "log_messages": new_logs,
