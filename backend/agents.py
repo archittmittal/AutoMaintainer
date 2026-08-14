@@ -1,4 +1,5 @@
 import os
+import operator
 from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
@@ -18,6 +19,7 @@ from supabase import create_client, Client
 
 load_dotenv()
 current_run_id = ContextVar("current_run_id")
+background_tasks = set()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -79,9 +81,6 @@ def get_all_groq_keys():
     return keys
 
 
-import operator
-
-
 class AgentState(TypedDict):
     repo_name: str
     target_issue: int | None
@@ -131,7 +130,7 @@ async def run_llm(system_prompt: str, user_prompt: str) -> str:
 
     run_id = current_run_id.get(None)
     if run_id:
-        asyncio.create_task(
+        task = asyncio.create_task(
             broadcast_log(
                 {
                     "type": "ui_update",
@@ -139,6 +138,8 @@ async def run_llm(system_prompt: str, user_prompt: str) -> str:
                 }
             )
         )
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
 
     return response.content
 
@@ -220,7 +221,9 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
                                         }
                                     )
 
-                return final_res["messages"][-1].content
+                if final_res is not None and "messages" in final_res and len(final_res["messages"]) > 0:
+                    return final_res["messages"][-1].content
+                raise ValueError("Agent stream completed without returning a result.")
     except Exception as e:
         err_str = str(e)
         if "RateLimitError" in err_str or "429" in err_str:
@@ -238,7 +241,7 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
             print(f"LLM execution completely failed: {e2}")
             run_id = current_run_id.get(None)
             if run_id:
-                asyncio.create_task(
+                task = asyncio.create_task(
                     broadcast_log(
                         {
                             "agent": "System",
@@ -247,6 +250,8 @@ async def run_llm_with_tools(system_prompt: str, user_prompt: str):
                         }
                     )
                 )
+                background_tasks.add(task)
+                task.add_done_callback(background_tasks.discard)
             return f"[ERROR] LLM execution failed: {e2}"
 
 
@@ -264,7 +269,6 @@ async def architect_node(state: AgentState):
             gh_repo = gh.get_repo(repo)
             issue = gh_repo.get_issue(number=target_issue)
             directive = f"Targeted Issue #{target_issue}: {issue.title}\n{issue.body}"
-            state["architect_directive"] = directive
 
             new_logs.append(
                 {
@@ -332,14 +336,23 @@ async def architect_node(state: AgentState):
                 "git", "clone", repo_url, repo_dir
             )
             await clone_proc.communicate()
+            if clone_proc.returncode != 0:
+                raise RuntimeError(
+                    f"git clone failed with exit code {clone_proc.returncode}"
+                )
         except Exception as e:
             print(f"Failed to clone repo {safe_repo_url}: {e}")
+            raise e
     else:
         try:
             pull_proc = await asyncio.create_subprocess_exec(
                 "git", "pull", "--ff-only", cwd=repo_dir
             )
             await pull_proc.communicate()
+            if pull_proc.returncode != 0:
+                print(
+                    f"git pull failed with exit code {pull_proc.returncode}, continuing with cache"
+                )
         except Exception as e:
             print(f"Failed to pull repo {safe_repo_url}, continuing with cache: {e}")
 
@@ -454,7 +467,6 @@ async def architect_node(state: AgentState):
     user_prompt = f"Repo: {repo}\n\nFiles:\n{tree_content}\n\nREADME:\n{readme_content[:1000]}\n\n{ast_context_str}\n\nGenerate the architect_directive."
 
     directive = await run_llm_with_tools(system_prompt, user_prompt)
-    state["architect_directive"] = directive
 
     new_logs.append(
         {
@@ -486,7 +498,7 @@ async def architect_node(state: AgentState):
     )
     new_logs.append({"type": "ui_update", "agentStatus": {"Architect": "idle"}})
     return {
-        "architect_directive": state.get("architect_directive", ""),
+        "architect_directive": directive,
         "log_messages": new_logs,
     }
 
@@ -498,8 +510,6 @@ async def brainstormer_node(state: AgentState):
     target_issue = state.get("target_issue")
 
     if target_issue:
-        state["idea"] = directive
-        state["issue_number"] = target_issue
         new_logs.append({"type": "ui_update", "agentStatus": {"Visionary": "active"}})
         new_logs.append(
             {
@@ -519,7 +529,6 @@ async def brainstormer_node(state: AgentState):
     user_prompt = f"Architect Directive:\n{directive}\n\nBrainstorm a new feature for {repo}. Keep it under 3 sentences."
 
     idea = await run_llm_with_tools(system_prompt, user_prompt)
-    state["idea"] = idea
 
     new_logs.append({"type": "ui_update", "agentStatus": {"Visionary": "active"}})
     new_logs.append(
@@ -541,6 +550,7 @@ async def brainstormer_node(state: AgentState):
         }
     )
 
+    issue_number = 0
     if gh:
         try:
             gh_repo = gh.get_repo(repo)
@@ -548,7 +558,7 @@ async def brainstormer_node(state: AgentState):
                 title="[Feature Request] Implement proposed architecture enhancements",
                 body=f"### Architect Directive\n{directive}\n\n### Proposed Feature\n{idea}",
             )
-            state["issue_number"] = issue.number
+            issue_number = issue.number
             new_logs.append(
                 {
                     "agent": "System",
@@ -578,7 +588,7 @@ async def brainstormer_node(state: AgentState):
     new_logs.append({"type": "ui_update", "agentStatus": {"Visionary": "idle"}})
     return {
         "idea": idea,
-        "issue_number": state.get("issue_number", 0),
+        "issue_number": issue_number,
         "log_messages": new_logs,
     }
 
@@ -606,7 +616,6 @@ async def pm_node(state: AgentState):
 
     if target_issue:
         decision = "APPROVED (Auto-approved by Targeted Issue Mode)"
-        state["pm_decision"] = decision
         new_logs.append(
             {
                 "agent": "Reviewer",
@@ -622,7 +631,6 @@ async def pm_node(state: AgentState):
     decision = await run_llm_with_tools(
         system_prompt, f"Directive: {directive}\n\nReview this idea: {idea}"
     )
-    state["pm_decision"] = decision
 
     is_approved = decision.strip().upper().startswith("APPROVED")
     msg_color = "text-amber-400" if is_approved else "text-red-400"
@@ -672,6 +680,8 @@ async def implementer_node(state: AgentState):
     iteration = state.get("iteration", 0)
     prev_code = state.get("code", "")
     review = state.get("review", "")
+    out_branch_name = state.get("branch_name", "")
+    out_pr_number = state.get("pr_number", 0)
 
     if iteration > 0:
         system_prompt = "You are the Implementer Agent. Your previous code was rejected by the Maintainer. Fix it based on their feedback. Output ONLY the fixed Python script."
@@ -681,7 +691,6 @@ async def implementer_node(state: AgentState):
         user_prompt = f"Write code for: {idea}"
 
     code = await run_llm_with_tools(system_prompt, user_prompt)
-    state["code"] = code
 
     new_logs.append({"type": "ui_update", "agentStatus": {"Implementer": "active"}})
 
@@ -728,26 +737,25 @@ async def implementer_node(state: AgentState):
             if iteration == 0:
                 default_branch = gh_repo.default_branch
                 sb = gh_repo.get_branch(default_branch)
-                branch_name = f"feature/issue-{issue_number}-{uuid.uuid4().hex[:4]}"
-                state["branch_name"] = branch_name
+                out_branch_name = f"feature/issue-{issue_number}-{uuid.uuid4().hex[:4]}"
                 gh_repo.create_git_ref(
-                    ref=f"refs/heads/{branch_name}", sha=sb.commit.sha
+                    ref=f"refs/heads/{out_branch_name}", sha=sb.commit.sha
                 )
 
                 gh_repo.create_file(
                     path=path,
                     message=f"Implement Feature for Issue #{issue_number}",
                     content=code_to_commit,
-                    branch=branch_name,
+                    branch=out_branch_name,
                 )
 
                 pr = gh_repo.create_pull(
                     title=f"Implement Feature Request #{issue_number}",
                     body=f"This PR resolves #{issue_number}.\n\nCloses #{issue_number}",
-                    head=branch_name,
+                    head=out_branch_name,
                     base=default_branch,
                 )
-                state["pr_number"] = pr.number
+                out_pr_number = pr.number
                 new_logs.append(
                     {
                         "agent": "System",
@@ -766,24 +774,22 @@ async def implementer_node(state: AgentState):
                     }
                 )
             else:
-                branch_name = state["branch_name"]
-                file = gh_repo.get_contents(path, ref=branch_name)
+                file = gh_repo.get_contents(path, ref=out_branch_name)
                 gh_repo.update_file(
                     path=file.path,
                     message=f"Fix: Address maintainer feedback (Iteration {iteration})",
                     content=code_to_commit,
                     sha=file.sha,
-                    branch=branch_name,
+                    branch=out_branch_name,
                 )
-                pr_number = state["pr_number"]
-                pr = gh_repo.get_pull(pr_number)
+                pr = gh_repo.get_pull(out_pr_number)
                 pr.create_issue_comment(
                     f"I have pushed a new commit to address the feedback. (Iteration {iteration})"
                 )
                 new_logs.append(
                     {
                         "agent": "System",
-                        "msg": f"Pushed fix to PR #{pr_number}",
+                        "msg": f"Pushed fix to PR #{out_pr_number}",
                         "color": "text-emerald-500",
                     }
                 )
@@ -822,8 +828,8 @@ async def implementer_node(state: AgentState):
     new_logs.append({"type": "ui_update", "agentStatus": {"Implementer": "idle"}})
     return {
         "code": code,
-        "branch_name": state.get("branch_name", ""),
-        "pr_number": state.get("pr_number", 0),
+        "branch_name": out_branch_name,
+        "pr_number": out_pr_number,
         "log_messages": new_logs,
     }
 
@@ -837,7 +843,6 @@ async def maintainer_node(state: AgentState):
 
     system_prompt = "You are the Maintainer. Review the code. Say 'LGTM' if it looks okay, or point out a flaw."
     review = await run_llm_with_tools(system_prompt, f"Review this code:\n{code}")
-    state["review"] = review
 
     new_logs.append({"type": "ui_update", "agentStatus": {"Maintainer": "active"}})
     new_logs.append(
@@ -884,13 +889,12 @@ async def maintainer_node(state: AgentState):
                 }
             )
 
-    if not is_lgtm:
-        state["iteration"] = iteration + 1
+    next_iteration = iteration + 1 if not is_lgtm else iteration
 
     new_logs.append({"type": "ui_update", "agentStatus": {"Maintainer": "idle"}})
     return {
         "review": review,
-        "iteration": state.get("iteration", 0),
+        "iteration": next_iteration,
         "log_messages": new_logs,
     }
 

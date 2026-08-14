@@ -13,6 +13,8 @@ def test_terminal_websocket_origin_security():
         ) as ws:
             ws.receive_text()
             assert False, "Should have been disconnected"
+    except AssertionError:
+        raise
     except Exception:
         pass
 

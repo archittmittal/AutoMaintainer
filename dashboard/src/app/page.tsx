@@ -117,14 +117,15 @@ export default function Home() {
       const { data, error } = await supabase.from('logs').select('*').eq('run_id', activeRunId).order('created_at', { ascending: true });
       if (data && data.length > 0) {
         const historyLogs: any[] = [];
+        let accumulatedTokens = 0;
+        let lastLatency = 0;
+
         data.forEach((row: any) => {
           if (row.log_type === 'ui_update') {
             const msgData = row.metadata || {};
             if (msgData.systemHealth) {
-              setSystemHealth(prev => ({
-                latency: msgData.systemHealth.latency || prev.latency,
-                tokensUsed: prev.tokensUsed + (msgData.systemHealth.tokensUsed || 0)
-              }));
+              lastLatency = msgData.systemHealth.latency || lastLatency;
+              accumulatedTokens += (msgData.systemHealth.tokensUsed || 0);
             }
             if (msgData.agentStatus) setAgentStatus((prev: any) => ({ ...prev, ...msgData.agentStatus }));
             if (msgData.pipeline) {
@@ -145,6 +146,10 @@ export default function Home() {
             });
           }
         });
+        setSystemHealth({
+          latency: lastLatency,
+          tokensUsed: accumulatedTokens
+        });
         if (historyLogs.length > 0) {
           setLogs(prev => [...prev, ...historyLogs]);
         }
@@ -158,6 +163,12 @@ export default function Home() {
         const row = payload.new as any;
         if (row.log_type === 'ui_update') {
           const msgData = row.metadata || {};
+          if (msgData.systemHealth) {
+            setSystemHealth(prev => ({
+              latency: msgData.systemHealth.latency || prev.latency,
+              tokensUsed: prev.tokensUsed + (msgData.systemHealth.tokensUsed || 0)
+            }));
+          }
           if (msgData.agentStatus) setAgentStatus((prev: any) => ({ ...prev, ...msgData.agentStatus }));
           if (msgData.pipeline) {
             setPipeline((prev) => {

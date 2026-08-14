@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from github import Github
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from typing import Optional
 from agents import run_agent_loop
 import asyncio
@@ -236,6 +235,15 @@ async def create_repo_file(repo_name: str, payload: FileCreateRequest):
 
 @app.delete("/repo/{repo_name:path}/file")
 async def delete_repo_file(repo_name: str, file_path: str):
+    # Validate file_path to prevent path traversal
+    normalized_path = os.path.normpath(file_path)
+    if (
+        normalized_path.startswith("..")
+        or os.path.isabs(normalized_path)
+        or ".." in normalized_path.split(os.path.sep)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
     token = os.getenv("GITHUB_TOKEN")
     if not token:
         raise HTTPException(status_code=401, detail="GitHub token not configured")

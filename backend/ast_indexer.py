@@ -15,7 +15,6 @@ TS_LANGUAGE = Language(tree_sitter_typescript.language_typescript())
 
 class TreeSitterParser:
     def __init__(self):
-        self.parser = Parser()
         self.language_map = {
             ".py": PY_LANGUAGE,
             ".js": JS_LANGUAGE,
@@ -29,7 +28,7 @@ class TreeSitterParser:
         if ext not in self.language_map:
             return None
 
-        self.parser.language = self.language_map[ext]
+        parser = Parser(self.language_map[ext])
 
         try:
             with open(filepath, "r", encoding="utf-8") as f:
@@ -37,7 +36,7 @@ class TreeSitterParser:
         except Exception:
             return None
 
-        tree = self.parser.parse(bytes(code, "utf8"))
+        tree = parser.parse(bytes(code, "utf8"))
 
         classes = []
         functions = []
